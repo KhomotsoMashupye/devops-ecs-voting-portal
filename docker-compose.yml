@@ -1,0 +1,42 @@
+services:
+  # The "Booth" (Nginx)
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80" # Access the site at http://localhost:8080
+    networks:
+      - voting-network
+
+  # The "Intake" (Node.js API)
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgres://user:password@db:5432/voting_db
+    networks:
+      - voting-network
+    depends_on:
+      - db
+
+  # The "Ledger" (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=voting_db
+    networks:
+      - voting-network
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+networks:
+  voting-network:
+    driver: bridge
+
+volumes:
+  db-data:
+
+ 

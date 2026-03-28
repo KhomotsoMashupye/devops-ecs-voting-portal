@@ -1,0 +1,13 @@
+
+FROM nginx:alpine
+
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy our frontend files into the Nginx html directory
+COPY index.html /usr/share/nginx/html/index.html
+COPY style.css /usr/share/nginx/html/style.css
+COPY script.js /usr/share/nginx/html/script.js
+
+
+EXPOSE 80
+
