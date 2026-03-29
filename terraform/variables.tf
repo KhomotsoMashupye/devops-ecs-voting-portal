@@ -18,3 +18,23 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "availability_zones" {
+  description = "AZs to use for High Availability"
+  type        = list(string)
+  default     = ["af-south-1a", "af-south-1b"]
+}
+
+variable "public_subnet_cidrs" {
+  type    = list(string)
+  default = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "private_subnet_cidrs" {
+  type    = list(string)
+  default = ["10.0.10.0/24", "10.0.11.0/24"]
+}
+
+variable "database_subnet_cidrs" {
+  type    = list(string)
+  default = ["10.0.20.0/24", "10.0.21.0/24"]
+}
