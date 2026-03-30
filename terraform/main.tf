@@ -264,12 +264,6 @@ resource "aws_security_group" "ecs_sg" {
 
   ingress {
     protocol        = "tcp"
-    from_port       = 3000 
-    to_port         = 3000
-    security_groups = [aws_security_group.alb_sg.id]
-  }
-  ingress {
-    protocol        = "tcp"
     from_port       = 80
     to_port         = 80
     security_groups = [aws_security_group.alb_sg.id]
@@ -349,6 +343,8 @@ resource "aws_ecs_task_definition" "app" {
   
   cpu                      = "512"
   memory                   = "1024"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn
 
   container_definitions = jsonencode([
 
@@ -363,6 +359,8 @@ resource "aws_ecs_task_definition" "app" {
         }
       ]
       environment = [
+        { name = "S3_BUCKET_NAME", value = aws_s3_bucket.assets.id },
+        { name = "NODE_ENV",       value = "production" }
         { name = "DB_HOST", value = aws_db_instance.main.address },
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_username },
@@ -396,7 +394,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
       
       environment = [
-        { name = "BACKEND_URL", value = "http://localhost:${var.container_port}" }
+        { name = "BACKEND_URL", value = "http://backend:3000" }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -529,7 +527,7 @@ resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   is_ipv6_enabled     = true
   comment             = "Voting Portal CloudFront"
-  # Note: No 'aliases' or 'viewer_certificate' block needed for default domain
+  
 
   origin {
     domain_name = aws_lb.main.dns_name
@@ -538,7 +536,7 @@ resource "aws_cloudfront_distribution" "main" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "http-only"
+      origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
@@ -571,5 +569,147 @@ resource "aws_cloudfront_distribution" "main" {
     cloudfront_default_certificate = true
   }
 }
+# WAF
 
+resource "aws_wafv2_web_acl" "main" {
+  name     = "${var.project_name}-waf"
+  scope    = "Regional"
+  default_action { allow {} }
 
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "waf-main"
+    sampled_requests_enabled   = true
+  }
+
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 1
+    override_action { none {} }
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "waf-common"
+      sampled_requests_enabled   = true
+    }
+  }
+}
+resource "aws_cloudwatch_log_group" "waf" {
+  name              = "/aws/waf/${var.project_name}"
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.main.arn
+}
+resource "aws_wafv2_web_acl_association" "main" {
+  resource_arn = aws_lb.main.arn
+  web_acl_arn  = aws_wafv2_web_acl.main.arn
+}
+resource "aws_wafv2_web_acl_logging_configuration" "main" {
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+  resource_arn            = aws_wafv2_web_acl.main.arn
+}
+
+# S3  Bucket for Load Balancer Access Logs
+resource "aws_s3_bucket" "logs" {
+  bucket        = "${var.project_name}-logs-mashupye"
+  force_destroy = true
+}
+
+# S3 Bucket for Application Assets
+resource "aws_s3_bucket" "assets" {
+  bucket        = "${var.project_name}-assets-mashupye"
+  force_destroy = true
+}
+
+# Enable Versioning
+
+resource "aws_s3_bucket_versioning" "assets" {
+  bucket = aws_s3_bucket.assets.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Server-Side Encryption 
+resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
+  bucket = aws_s3_bucket.assets.id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.main.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+resource "aws_s3_bucket_policy" "allow_alb_logging" {
+  bucket = aws_s3_bucket.logs.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::098369216593:root"
+        }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/167217327829/*"
+      }
+    ]
+  })
+}
+resource "aws_iam_role_policy" "ecs_s3_access" {
+  name = "${var.project_name}-s3-access"
+  role = aws_iam_role.ecs_task_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.assets.arn,
+          "${aws_s3_bucket.assets.arn}/*"
+        ]
+      }
+    ]
+  })
+}# The "Application" Role
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.project_name}-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "backend_s3_usage" {
+  name = "${var.project_name}-backend-s3-policy"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:ListBucket"]
+        Resource = [
+          aws_s3_bucket.assets.arn,
+          "${aws_s3_bucket.assets.arn}/*"
+        ]
+      }
+    ]
+  })
+}

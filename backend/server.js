@@ -15,8 +15,6 @@ app.post('/api/vote', (req, res) => {
 
     console.log(`Received vote for: ${candidate}`);
 
-    // 2. Logic for the next step (e.g., sending to SQS or DB)
-    // For now, we just send a success message
     res.status(200).json({ message: "Vote recorded!" });
 });
 

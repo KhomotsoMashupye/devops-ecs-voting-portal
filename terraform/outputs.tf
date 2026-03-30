@@ -39,5 +39,11 @@ output "db_secret_arn" {
 output "ecs_cluster_name" {
   value = aws_ecs_cluster.main.name
 }
+output "assets_bucket_name" {
+  value = aws_s3_bucket.assets.id
+}
 
+output "waf_acl_arn" {
+  value = aws_wafv2_web_acl.main.arn
+}
 
