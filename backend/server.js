@@ -18,7 +18,7 @@ app.post('/api/vote', (req, res) => {
     res.status(200).json({ message: "Vote recorded!" });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 80;
 app.listen(PORT, () => {
     console.log(`Voting API listening on port ${PORT}`);
 });

@@ -32,7 +32,6 @@ provider "aws" {
 data "aws_ec2_managed_prefix_list" "cloudfront" {
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }
-
 # KMS Key
 
 resource "aws_kms_key" "main" {
@@ -71,8 +70,25 @@ resource "aws_kms_key" "main" {
             "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:af-south-1:167217327829:log-group:*"
           }
         }
-      }
-    ]
+      },
+      {
+        Sid    = "Allow CloudTrail to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt"
+        ]
+        Resource = "*" 
+        Condition = { 
+          StringLike = {
+            "kms:EncryptionContext:aws:cloudtrail:arn" = "arn:aws:cloudtrail:af-south-1:167217327829:trail/*"
+          }
+        }
+      } 
+    ] 
   })
 }
 resource "aws_kms_alias" "main" {
@@ -296,6 +312,22 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+
+resource "aws_iam_role_policy" "task_rds_access" {
+  name = "${var.project_name}-task-rds-policy"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue", "kms:Decrypt"]
+        Resource = [aws_secretsmanager_secret.db_password.arn, aws_kms_key.main.arn]
+      }
+    ]
+  })
+}
 # ECS Service
 
 resource "aws_ecs_service" "main" {
@@ -337,14 +369,13 @@ resource "aws_ecs_cluster" "main" {
 resource "aws_ecs_task_definition" "app" {
   family                   = "${var.project_name}-task"
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn            = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   
   cpu                      = "512"
   memory                   = "1024"
-  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn
+
 
   container_definitions = jsonencode([
 
@@ -360,7 +391,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
       environment = [
         { name = "S3_BUCKET_NAME", value = aws_s3_bucket.assets.id },
-        { name = "NODE_ENV",       value = "production" }
+        { name = "NODE_ENV",       value = "production" },
         { name = "DB_HOST", value = aws_db_instance.main.address },
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_username },
@@ -573,8 +604,12 @@ resource "aws_cloudfront_distribution" "main" {
 
 resource "aws_wafv2_web_acl" "main" {
   name     = "${var.project_name}-waf"
-  scope    = "Regional"
-  default_action { allow {} }
+  scope    = "REGIONAL"
+  default_action { 
+    allow {
+
+  } 
+  }
 
   visibility_config {
     cloudwatch_metrics_enabled = true
@@ -585,7 +620,12 @@ resource "aws_wafv2_web_acl" "main" {
   rule {
     name     = "AWSManagedRulesCommonRuleSet"
     priority = 1
-    override_action { none {} }
+    override_action {
+         none {
+
+         }
+          }
+
     statement {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
@@ -600,7 +640,7 @@ resource "aws_wafv2_web_acl" "main" {
   }
 }
 resource "aws_cloudwatch_log_group" "waf" {
-  name              = "/aws/waf/${var.project_name}"
+  name              = "aws-waf-logs-${var.project_name}"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.main.arn
 }
@@ -625,6 +665,12 @@ resource "aws_s3_bucket" "assets" {
   force_destroy = true
 }
 
+# S3 Bucket for CloudTrail Logs
+resource "aws_s3_bucket" "cloudtrail" {
+  bucket        = "${var.project_name}-cloudtrail-mashupye"
+  force_destroy = true
+}
+
 # Enable Versioning
 
 resource "aws_s3_bucket_versioning" "assets" {
@@ -635,6 +681,7 @@ resource "aws_s3_bucket_versioning" "assets" {
 }
 
 # Server-Side Encryption 
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
   bucket = aws_s3_bucket.assets.id
   rule {
@@ -681,7 +728,9 @@ resource "aws_iam_role_policy" "ecs_s3_access" {
       }
     ]
   })
-}# The "Application" Role
+}
+
+# The "Application" Role
 resource "aws_iam_role" "ecs_task_role" {
   name = "${var.project_name}-task-role"
 
@@ -712,4 +761,111 @@ resource "aws_iam_role_policy" "backend_s3_usage" {
       }
     ]
   })
+}
+# Cloudtrail
+
+resource "aws_cloudtrail" "main" {
+  name                          = "${var.project_name}-trail"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail.id
+  include_global_service_events = true
+  is_multi_region_trail         = true 
+  enable_log_file_validation    = true
+  kms_key_id                    = aws_kms_key.main.arn
+  depends_on = [aws_s3_bucket_policy.cloudtrail]
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSCloudTrailAclCheck"
+        Effect = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.cloudtrail.arn
+      },
+      {
+        Sid    = "AWSCloudTrailWrite"
+        Effect = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action   = "s3:PutObject"
+        # Ensure this path is exactly as CloudTrail expects: /AWSLogs/ACCOUNT_ID/*
+        Resource = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
+        }
+      }
+    ]
+  })
+}
+# AWS Confiq
+
+resource "aws_iam_role" "config" {
+  name = "${var.project_name}-config-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "config.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "config" {
+  role       = aws_iam_role.config.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole"
+}
+
+resource "aws_config_configuration_recorder" "main" {
+  name     = "${var.project_name}-recorder"
+  role_arn = aws_iam_role.config.arn
+}
+
+resource "aws_config_delivery_channel" "main" {
+  name           = "${var.project_name}-delivery"
+  s3_bucket_name = aws_s3_bucket.logs.id
+  depends_on     = [aws_config_configuration_recorder.main]
+}
+
+resource "aws_config_configuration_recorder_status" "main" {
+  name       = aws_config_configuration_recorder.main.name
+  is_enabled = true
+  depends_on = [aws_config_delivery_channel.main]
+}
+resource "aws_s3_bucket_policy" "config_logging" {
+  bucket = aws_s3_bucket.logs.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSConfigBucketPermissionsCheck"
+        Effect = "Allow"
+        Principal = { Service = "config.amazonaws.com" }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.logs.arn
+      },
+      {
+        Sid    = "AWSConfigBucketDelivery"
+        Effect = "Allow"
+        Principal = { Service = "config.amazonaws.com" }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/Config/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
+        }
+      }
+    ]
+  })
+}
+
+# Guard Duty
+
+resource "aws_guardduty_detector" "main" {
+  enable = true
 }
