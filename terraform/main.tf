@@ -29,6 +29,10 @@ provider "aws" {
     }
   }
 }
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
 # KMS Key
 
 resource "aws_kms_key" "main" {
@@ -198,15 +202,16 @@ resource "aws_security_group" "alb_sg" {
     protocol    = "tcp"
     from_port   = 80
     to_port     = 80
-    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
   }
 
   egress {
     protocol    = "tcp"
     from_port   = 0
-    to_port     = 65535
+    to_port     = 0
     cidr_blocks = ["0.0.0.0/0"]
   }
+  
 }
 
 # Load Balancer
@@ -261,6 +266,12 @@ resource "aws_security_group" "ecs_sg" {
     protocol        = "tcp"
     from_port       = 3000 
     to_port         = 3000
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+  ingress {
+    protocol        = "tcp"
+    from_port       = 80
+    to_port         = 80
     security_groups = [aws_security_group.alb_sg.id]
   }
 
@@ -512,3 +523,53 @@ resource "aws_ecr_repository" "frontend" {
     kms_key         = aws_kms_key.main.arn
   }
 }
+# CloudFront
+
+resource "aws_cloudfront_distribution" "main" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  comment             = "Voting Portal CloudFront"
+  # Note: No 'aliases' or 'viewer_certificate' block needed for default domain
+
+  origin {
+    domain_name = aws_lb.main.dns_name
+    origin_id   = "ALB-Origin"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ALB-Origin"
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+
