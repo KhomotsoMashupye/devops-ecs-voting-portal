@@ -22,3 +22,24 @@ output "database_subnets" {
 output "nat_gateway_ip" {
   value = aws_eip.nat.public_ip
 }
+
+output "alb_dns_name" {
+  value = aws_lb.main.dns_name
+}
+output "rds_endpoint" {
+  value = aws_db_instance.main.endpoint
+}
+output "ecs_execution_role_arn" {
+  value = aws_iam_role.ecs_task_execution_role.arn
+}
+
+output "db_secret_arn" {
+  value = aws_secretsmanager_secret.db_password.arn
+}
+output "ecs_cluster_name" {
+  value = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  value = aws_ecs_service.main.name
+}
