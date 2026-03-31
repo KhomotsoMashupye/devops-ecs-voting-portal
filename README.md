@@ -1,181 +1,78 @@
 # 🗳️ Cloud-Native Secure Voting Infrastructure
 
-A high-availability, security-hardened infrastructure stack designed for **national-scale digital voting systems**. This project demonstrates a **Zero-Trust architecture**, emphasizing deep network isolation, asynchronous processing, compliance alignment, and full CI/CD automation.
+A high-availability, security-hardened infrastructure stack designed for **national-scale digital voting systems**. This project demonstrates a **Zero-Trust architecture**, emphasizing deep network isolation, asynchronous processing, South African data sovereignty (POPIA) compliance, and full CI/CD automation.
 
 ---
 
-# 📌 Project Overview
+## 📌 Project Overview
 
-This system ensures that **core services (API & Database) are never exposed to the public internet**, while maintaining:
-
-- Scalability
-- Resiliency
-- Operational efficiency
-- Security and compliance alignment
+This system is engineered to ensure that **core services (API & Database) are never exposed to the public internet**, providing a resilient foundation for sensitive electoral data.
 
 ###  Key Principles
-- Zero Trust Networking
-- Event-Driven Architecture
-- Infrastructure as Code (Terraform)
-- Immutable Deployments
-- Compliance-Aligned Design (SOC2, ISO 27001 principles)
+- **Zero Trust Networking:** Micro-segmentation via security groups and private subnets.
+- **Event-Driven Architecture:** Decoupling ingestion from processing via SQS.
+- **Infrastructure as Code:** 100% reproducible environment via Terraform.
+- **Compliance-Aligned:** Mapping AWS services to ISO 27001 and SOC2 controls.
 
 ---
 
-#  Architecture & Traffic Flow
+##  Architecture & Traffic Flow
 
-##  1. Edge Layer (Public)
+### 1. Edge Layer (Public Ingress)
+- **CloudFront & WAF:** Provides global SSL/TLS termination and protects against SQL Injection/XSS.
+- **Application Load Balancer (ALB):** Hosted in public subnets but restricted to accept traffic **only** from CloudFront IP ranges via an AWS Managed Prefix List.
 
-- **CloudFront**
-  - SSL/TLS termination
-  - Serves static content (frontend)
-  - Hides origin infrastructure
+### 2. Compute Layer (Private)
+- **ECS Fargate:** Runs containerized microservices in private subnets with no public IPs.
+- **NAT Gateway:** Enables outbound-only access for pulling ECR images and streaming logs to CloudWatch without exposing the containers to inbound threats.
 
-- **AWS WAF**
-  - Protects against SQL Injection & XSS attacks
-  - Enforces IP whitelists/blacklists
-
-- **Application Load Balancer (ALB)**
-  - Public subnet
-  - Accepts traffic **only from CloudFront**
-  - Routes requests to ECS backend services
+### 3. Messaging & Data Layer (Isolated)
+- **Amazon SQS:** Buffers incoming votes, enabling the system to handle massive traffic spikes without overwhelming the database.
+- **Amazon RDS (PostgreSQL):** Hosted in isolated subnets with zero internet access; accessible only by backend ECS tasks.
 
 ---
 
-##  2. Compute Layer (Private)
+##  Microservices Architecture
 
-- **ECS Fargate**
-  - Runs containerized microservices (frontend API proxy & backend)
-  - Deployed in private subnets
-  - No public IP addresses
-
-- **NAT Gateway**
-  - Provides outbound-only internet access for:
-    - Pulling Docker images from ECR
-    - Sending logs and metrics to CloudWatch
-
-- **Subnet Placement**
-  - Private subnets spread across multiple AZs for HA
-  - Security groups enforce:
-    - Backend services accept traffic **only from ALB**
-    - Outbound traffic through NAT only
+| Service | Tech Stack | Responsibility |
+| :--- | :--- | :--- |
+| **Frontend** | HTML, CSS, JS (Nginx) | Provides the voting UI; proxies requests to the backend. |
+| **Backend API** | Node.js + Express | Validates voter credentials and enqueues votes to SQS. |
+| **Worker** | Node.js / Worker | Consumes SQS messages and performs async database writes. |
 
 ---
 
-##  3. Messaging & Data Layer
-
-- **Amazon SQS**
-  - Buffers incoming vote requests
-  - Enables asynchronous processing
-  - Prevents backend overload
-  - Network restricted to ECS and VPC endpoints
-
-- **Amazon RDS (PostgreSQL)**
-  - Hosted in isolated subnets (no public access)
-  - Only accessible by backend ECS tasks
-  - Encrypted at rest via KMS
-  - Automated backups and snapshots
-
----
-
-#  Network Flow & Communication
-
-```text
-[Users/Browser] 
-      |
-      v
-  [CloudFront CDN]
-      |
-      v
-     [ALB - Public Subnet]
-      |
-      v
-  [ECS Backend Tasks - Private Subnet]
-      |          \
-      |           \
-      v            v
-   [SQS Queue]   [RDS DB - Isolated]
-   # Cloud-Native Secure Voting Infrastructure
-
-A high-availability, security-hardened infrastructure stack designed for national-scale digital balloting. Built with **Terraform**, this project demonstrates a **Zero-Trust** architecture focusing on deep network isolation, asynchronous processing, and South African data sovereignty compliance.
-
----
-
-## Microservices Architecture
-
-### Frontend Service
-*   **Tech Stack:** HTML, CSS, JavaScript.
-*   **Delivery:** Served via an Nginx container.
-*   **Communication:** Interacts with the Backend API via the Internal Load Balancer.
-
-###  Backend Service
-*   **Tech Stack:** Node.js + Express API.
-*   **Logic:** Validates incoming votes and enqueues messages to SQS.
-*   **Storage:** Reads/writes to the RDS PostgreSQL database.
-*   **Observability:** Streams application logs to CloudWatch.
-
-###  Messaging Worker
-*   **Logic:** Consumes messages from SQS.
-*   **Processing:** Performs vote processing asynchronously to prevent API latency.
-*   **Scaling:** Scales independently from the API layer based on SQS queue depth.
-
----
-
-##  CI/CD Pipeline (GitHub Actions)
-
-
+## CI/CD Pipeline (GitHub Actions)
 
 Automates the full lifecycle from code commit to production deployment.
 
-### 🔄 Pipeline Flow
-1.  **Trigger:** Push to the `main` branch.
-2.  **Build:** Generates Docker images for frontend, backend, and worker services.
-3.  **Versioning:** Images are tagged using the unique Git commit SHA for immutability.
-4.  **Push:** Images are stored in **Amazon ECR**.
-5.  **Infrastructure Sync:** Terraform validates and applies changes to VPC, ECS, RDS, and SQS.
-6.  **Deployment:** Updates ECS Task Definitions and triggers a **Zero-Downtime Rolling Deployment**.
+1. **Trigger:** Push to the `main` branch.
+2. **Build:** Generates Docker images for frontend, backend, and worker.
+3. **Versioning:** Images are tagged using the unique Git commit SHA for immutability.
+4. **Push:** Images are stored in encrypted **Amazon ECR** repositories.
+5. **Infrastructure Sync:** Terraform validates and applies changes to the VPC and resources.
+6. **Deployment:** Updates ECS Task Definitions and triggers a **Zero-Downtime Rolling Deployment**.
 
 ---
 
-## 🔒 Security & Compliance
+## 🔒 Security & Compliance Alignment
 
-This infrastructure is **designed to align with SOC2, ISO 27001, and PCI DSS principles**, ensuring data confidentiality, integrity, and availability. Security controls are implemented at every layer to maintain compliance with regulatory standards.
+This infrastructure is designed to align with **SOC2, ISO 27001, and POPIA** principles.
 
-### 1. Encryption
+### 1. Encryption (Data Protection)
 **AWS KMS (AES-256)** is applied to all sensitive resources:
-* **S3 Buckets** – All assets and logs are encrypted to comply with ISO 27001 A.10.1 and SOC2 CC6.1
-* **RDS Databases** – Encrypted at rest and in transit (ISO 27001 A.10.1, SOC2 CC6.1)
-* **ECR Image Repositories** – Container images are stored securely with encryption (ISO 27001 A.10.1)
-* **SQS Queues** – All messages encrypted to prevent data leakage (SOC2 CC6.1, ISO 27001 A.10.1)
+* **S3 Buckets:** Encrypted logs and assets (ISO 27001 A.10.1, SOC2 CC6.1).
+* **RDS Databases:** Encrypted at rest and in transit.
+* **SQS Queues:** Messages encrypted to prevent internal data leakage.
 
 ### 2. Audit & Monitoring
-Continuous monitoring is implemented to meet ISO 27001 A.12 and SOC2 CC7.1 requirements:
-* **AWS CloudTrail** – Records all API activity, enabling full auditability
-* **AWS Config** – Detects misconfigurations and enforces compliance rules
-  - Prevents public S3 buckets
-  - Disallows overly permissive security groups
-* **AWS GuardDuty** – Provides threat detection and anomaly monitoring
-* **CloudWatch Logs & Metrics** – Tracks operational activity for security and compliance reporting
+* **AWS CloudTrail:** Full API audit logs for forensic analysis (ISO 27001 A.12.4).
+* **AWS Config:** Automated compliance checks (e.g., ensuring no public S3 buckets).
+* **AWS GuardDuty:** Continuous ML-driven threat detection.
 
-### 3. Access Control
-* **IAM Policies** – Principle of least privilege applied (ISO 27001 A.9.1)
-* **Security Groups & NACLs** – Segmented by subnet type to enforce network isolation
-* **VPC Endpoints** – Internal services communicate privately without exposing traffic to the public internet
-
-### 4. Compliance Automation
-* Infrastructure as Code (Terraform) ensures repeatable, auditable deployments
-* CI/CD pipeline enforces security checks, image scanning, and automated deployment validation
-* Versioning and immutability of Docker images maintain traceability and integrity (SOC2 CC6.2)
-
-
-### Audit & Monitoring
-*   **CloudTrail:** Logs all API activity within the account.
-*   **AWS Config:** Automatically detects and alerts on resource misconfigurations.
-*   **GuardDuty:** ML-driven threat detection for malicious network activity.
-
-###  Data Sovereignty
-*   **Region:** `af-south-1` (Cape Town).
-*   **Compliance:** Ensures all sensitive electoral data remains within South African borders.
+### 3. Data Sovereignty
+* **Region:** `af-south-1` (Cape Town).
+* **Compliance:** Ensures all sensitive electoral data remains within South African borders, satisfying local regulatory requirements.
 
 ---
 
@@ -185,37 +82,27 @@ Continuous monitoring is implemented to meet ISO 27001 A.12 and SOC2 CC7.1 requi
 | :--- | :--- | :--- |
 | **ALB Load Balancer** | Public | Inbound: CloudFront IPs Only |
 | **ECS Tasks** | Private | Inbound: ALB Only | Outbound: NAT Gateway |
-| **SQS Queue** | Internal | Access via VPC Interface Endpoint |
+| **SQS Queue** | Internal | Access via VPC Interface Endpoints |
 | **RDS Database** | Isolated | Inbound: ECS Tasks Only |
 
 ---
 
-## 🔧 Future Improvements
-*   **Autoscaling:** Implementation of Target Tracking scaling based on SQS `ApproximateNumberOfMessagesVisible`.
-*   **Monitoring:** Integration of CloudWatch Alarms with SNS notifications for real-time alerting.
-*   **Secrets Management:** Dynamic rotation of database credentials using **AWS Secrets Manager**.
-*   **Deployment Strategies:** Introduction of **Canary Deployments** and automated rollbacks via AWS CodeDeploy.
-* Integration with AWS Security Hub for centralized compliance reporting
-* Automated remediation scripts for non-compliant resources
-* Formal third-party ISO 27001 and SOC2 audit preparation
-* Incorporation of GDPR and POPIA compliance for data handling policies
+##  Project Structure
+
+```text
 .
-├── .github/
-│   └── workflows/
-│       └── deploy.yml        
+├── .github/workflows/
+│   └── deploy.yml          # CI/CD Pipeline
 ├── terraform/
-│   ├── main.tf               
-│   ├── variables.tf
-│   └── outputs.tf
+│   ├── main.tf             # Core Infrastructure
+│   ├── variables.tf        # Configurable Params
+│   └── outputs.tf          # Resource Endpoints
 ├── backend/
-│   ├── app.js
-│   ├── Dockerfile
-│   └── package.json
+│   ├── app.js              # Express API
+│   └── Dockerfile          # Node.js Prod Image
 ├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   ├── script.js
-│   └── Dockerfile
-├── docker-compose.yml        
-├── .gitignore
-└── README.md
+│   ├── index.html          # UI
+│   └── Dockerfile          # Nginx Static Server
+├── docker-compose.yml      # Local Dev Environment
+├── .gitignore              # Dependency/Secret exclusion
+└── README.md               # Project Documentation
