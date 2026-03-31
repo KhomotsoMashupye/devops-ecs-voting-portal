@@ -218,7 +218,7 @@ resource "aws_security_group" "alb_sg" {
     protocol    = "tcp"
     from_port   = 80
     to_port     = 80
-    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -244,7 +244,7 @@ resource "aws_lb" "main" {
 
 resource "aws_lb_target_group" "frontend" {
   name        = "${var.project_name}-tg"
-  port        = 80
+  port        = 3000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
@@ -262,8 +262,8 @@ resource "aws_lb_target_group" "frontend" {
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
-  port              = "443"
-  protocol          = "HTTPS"
+  port              = "80"
+  protocol          = "HTTP"
 
   default_action {
     type             = "forward"
@@ -280,8 +280,8 @@ resource "aws_security_group" "ecs_sg" {
 
   ingress {
     protocol        = "tcp"
-    from_port       = 80
-    to_port         = 80
+    from_port       = 3000
+    to_port         = 3000
     security_groups = [aws_security_group.alb_sg.id]
   }
 
@@ -601,6 +601,7 @@ resource "aws_cloudfront_distribution" "main" {
     cloudfront_default_certificate = true
   }
 }
+
 # WAF
 
 resource "aws_wafv2_web_acl" "main" {
@@ -748,10 +749,10 @@ resource "aws_iam_role_policy" "backend_s3_usage" {
     ]
   })
 }
-# Cloudtrail
+ # Cloudtrail
 
-resource "aws_cloudtrail" "main" {
-  name                          = "${var.project_name}-trail"
+ resource "aws_cloudtrail" "main" {
+ name                          = "${var.project_name}-trail"
   s3_bucket_name                = aws_s3_bucket.cloudtrail.id
   include_global_service_events = true
   is_multi_region_trail         = true 
@@ -825,31 +826,34 @@ resource "aws_config_configuration_recorder_status" "main" {
 }
 resource "aws_s3_bucket_policy" "logs_combined_policy" {
   bucket = aws_s3_bucket.logs.id
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        {
+        
+        Sid    = "AllowIAMLogs"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::098369216593:root
+          AWS = "arn:aws:iam::098369216593:root"
         }
         Action   = "s3:PutObject"
         Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/167217327829/*"
       },
+      {
         
-        Sid    = "AWSConfigBucketPermissionsCheck"
-        Effect = "Allow"
+        Sid       = "AWSConfigBucketPermissionsCheck"
+        Effect    = "Allow"
         Principal = { Service = "config.amazonaws.com" }
-        Action   = "s3:GetBucketAcl"
-        Resource = aws_s3_bucket.logs.arn
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.logs.arn
       },
       {
-        Sid    = "AWSConfigBucketDelivery"
-        Effect = "Allow"
+        Sid       = "AWSConfigBucketDelivery"
+        Effect    = "Allow"
         Principal = { Service = "config.amazonaws.com" }
-        Action   = "s3:PutObject"
-        Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/Config/*"
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/Config/*"
         Condition = {
           StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
         }
@@ -857,6 +861,7 @@ resource "aws_s3_bucket_policy" "logs_combined_policy" {
     ]
   })
 }
+
 
 # Guard Duty
 

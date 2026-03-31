@@ -6,7 +6,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// The SDK automatically finds the IAM Task Role permissions we set in Terraform
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'af-south-1' });
 
 app.post('/api/vote', async (req, res) => {
@@ -17,7 +20,6 @@ app.post('/api/vote', async (req, res) => {
     }
 
     try {
-        // Prepare the SQS message
         const params = {
             QueueUrl: process.env.SQS_QUEUE_URL,
             MessageBody: JSON.stringify({
@@ -25,15 +27,15 @@ app.post('/api/vote', async (req, res) => {
                 voterIp: req.ip,
                 timestamp: new Date().toISOString()
             }),
+            
             MessageAttributes: {
-                "DataType": {
+                "VoteType": { 
                     DataType: "String",
                     StringValue: "VoteEntry"
                 }
             }
         };
 
-        // Send to SQS (via the VPC Private Endpoint)
         const data = await sqsClient.send(new SendMessageCommand(params));
         
         console.log(`Vote for ${candidate} queued. ID: ${data.MessageId}`);
@@ -49,7 +51,7 @@ app.post('/api/vote', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Voting API listening on port ${PORT}`);
 });

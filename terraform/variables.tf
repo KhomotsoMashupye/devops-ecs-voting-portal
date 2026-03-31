@@ -41,7 +41,7 @@ variable "database_subnet_cidrs" {
 variable "health_check_path" {
   description = "Health check path for the ALB"
   type        = string
-  default     = "/"
+  default     = "/health"
 }
 variable "db_name" {
   description = "Name of the RDS database"
