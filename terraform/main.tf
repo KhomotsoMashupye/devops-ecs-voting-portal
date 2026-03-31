@@ -395,6 +395,7 @@ resource "aws_ecs_task_definition" "app" {
         { name = "DB_HOST", value = aws_db_instance.main.address },
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_username },
+        { name = "SQS_QUEUE_URL",  value = aws_sqs_queue.votes.id },
         { name = "PORT",    value = tostring(var.container_port) }
       ]
       secrets = [
@@ -868,4 +869,76 @@ resource "aws_s3_bucket_policy" "config_logging" {
 
 resource "aws_guardduty_detector" "main" {
   enable = true
+}
+
+#SQS
+
+resource "aws_sqs_queue" "votes" {
+  name                      = "${var.project_name}-votes-queue"
+  delay_seconds             = 0
+  max_message_size          = 262144
+  message_retention_seconds = 86400 
+  receive_wait_time_seconds = 10 
+  kms_master_key_id = aws_kms_key.main.id
+}
+resource "aws_iam_role_policy" "backend_sqs" {
+  name = "${var.project_name}-backend-sqs-policy"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = [aws_sqs_queue.votes.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = [aws_kms_key.main.arn]
+      }
+    ]
+  })
+}
+
+# VPC Endpoints
+
+# Security Group for VPC Endpoints
+
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "${var.project_name}-vpc-endpoints-sg"
+  description = "Allow ECS tasks to reach VPC Endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_sg.id]
+  }
+}
+
+# SQS Endpoint
+
+resource "aws_vpc_endpoint" "sqs" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.af-south-1.sqs"
+  vpc_endpoint_type   = "Interface"
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  subnet_ids          = aws_subnet.private[*].id
+  private_dns_enabled = true
+}
+
+# S3 Gateway Endpoint 
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.af-south-1.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
 }
