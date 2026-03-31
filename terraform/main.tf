@@ -262,8 +262,8 @@ resource "aws_lb_target_group" "frontend" {
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
-  port              = "80"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
 
   default_action {
     type             = "forward"
@@ -692,22 +692,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
     }
   }
 }
-resource "aws_s3_bucket_policy" "allow_alb_logging" {
-  bucket = aws_s3_bucket.logs.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::098369216593:root"
-        }
-        Action   = "s3:PutObject"
-        Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/167217327829/*"
-      }
-    ]
-  })
-}
 resource "aws_iam_role_policy" "ecs_s3_access" {
   name = "${var.project_name}-s3-access"
   role = aws_iam_role.ecs_task_execution_role.id
@@ -839,12 +823,21 @@ resource "aws_config_configuration_recorder_status" "main" {
   is_enabled = true
   depends_on = [aws_config_delivery_channel.main]
 }
-resource "aws_s3_bucket_policy" "config_logging" {
+resource "aws_s3_bucket_policy" "logs_combined_policy" {
   bucket = aws_s3_bucket.logs.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::098369216593:root
+        }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.logs.arn}/AWSLogs/167217327829/*"
+      },
+        
         Sid    = "AWSConfigBucketPermissionsCheck"
         Effect = "Allow"
         Principal = { Service = "config.amazonaws.com" }
