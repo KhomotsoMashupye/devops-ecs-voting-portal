@@ -244,7 +244,7 @@ resource "aws_lb" "main" {
 
 resource "aws_lb_target_group" "frontend" {
   name        = "${var.project_name}-tg"
-  port        = 3000
+  port        = 80
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
@@ -281,7 +281,7 @@ resource "aws_security_group" "ecs_sg" {
   ingress {
     protocol        = "tcp"
     from_port       = 3000
-    to_port         = 3000
+    to_port         = 80
     security_groups = [aws_security_group.alb_sg.id]
   }
 
@@ -398,6 +398,8 @@ resource "aws_ecs_task_definition" "app" {
         { name = "SQS_QUEUE_URL",  value = aws_sqs_queue.votes.id },
         { name = "PORT",    value = tostring(var.container_port) }
       ]
+    }
+      ])
       secrets = [
         {
           name      = "DB_PASSWORD"
@@ -415,19 +417,13 @@ resource "aws_ecs_task_definition" "app" {
     },
     
     {
-      name      = "${var.project_name}-frontend"
-      image     = "${aws_ecr_repository.frontend.repository_url}:latest"
-      essential = true
-      portMappings = [
-        {
-          containerPort = 80
-          hostPort      = 80
-        }
-      ]
-      
-      environment = [
-        { name = "BACKEND_URL", value = "http://backend:3000" }
-      ]
+  name  = "${var.project_name}-frontend"
+  image = "${aws_ecr_repository.frontend.repository_url}:latest"
+  
+  environment = [
+    { name = "BACKEND_URL", value = "http://127.0.0.1:3000" } 
+  ]
+}
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -939,4 +935,31 @@ resource "aws_vpc_endpoint" "s3" {
   service_name      = "com.amazonaws.af-south-1.s3"
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [aws_route_table.private.id]
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.af-south-1.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  subnet_ids          = aws_subnet.private[*].id
+  private_dns_enabled = true
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.af-south-1.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  subnet_ids          = aws_subnet.private[*].id
+  private_dns_enabled = true
+}
+
+resource "aws_vpc_endpoint" "logs" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.af-south-1.logs"
+  vpc_endpoint_type   = "Interface"
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  subnet_ids          = aws_subnet.private[*].id
+  private_dns_enabled = true
 }
