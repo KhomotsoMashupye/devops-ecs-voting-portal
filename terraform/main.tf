@@ -731,7 +731,8 @@ resource "aws_iam_role_policy" "ecs_s3_access" {
   })
 }
 
-# The "Application" Role
+# The Application Role
+
 resource "aws_iam_role" "ecs_task_role" {
   name = "${var.project_name}-task-role"
 
@@ -794,7 +795,6 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
         Effect = "Allow"
         Principal = { Service = "cloudtrail.amazonaws.com" }
         Action   = "s3:PutObject"
-        # Ensure this path is exactly as CloudTrail expects: /AWSLogs/ACCOUNT_ID/*
         Resource = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
         Condition = {
           StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
